@@ -16,6 +16,8 @@ const SHIP_MASS_KG: f64 = 50_000.0;
 pub struct Propulsion {
     pub thrust_n: f64,
     pub velocity_mps: f64,
+    /// Set by the `jettison` verb. A jettisoned drive produces no more thrust.
+    pub jettisoned: bool,
 }
 
 impl Default for Propulsion {
@@ -23,6 +25,7 @@ impl Default for Propulsion {
         Self {
             thrust_n: 0.0,
             velocity_mps: 0.0,
+            jettisoned: false,
         }
     }
 }
@@ -46,6 +49,10 @@ impl Subsystem for Propulsion {
                 name: "sys.propulsion.velocity_mps".into(),
                 value: self.velocity_mps,
             },
+            RawSample {
+                name: "sys.propulsion.jettisoned".into(),
+                value: if self.jettisoned { 1.0 } else { 0.0 },
+            },
         ]
     }
 
@@ -60,6 +67,7 @@ impl Subsystem for Propulsion {
             }),
         );
         spec.insert("set_thrust".into(), args);
+        spec.insert("jettison".into(), BTreeMap::new());
         spec
     }
 
@@ -70,6 +78,11 @@ impl Subsystem for Propulsion {
                     .get("thrust_n")
                     .ok_or_else(|| ApplyError::MissingArg("thrust_n".into()))?;
                 self.thrust_n = *thrust;
+                Ok(())
+            }
+            "jettison" => {
+                self.jettisoned = true;
+                self.thrust_n = 0.0;
                 Ok(())
             }
             other => Err(ApplyError::UnknownVerb(other.into())),
@@ -86,10 +99,24 @@ mod tests {
         let mut propulsion = Propulsion {
             thrust_n: 50_000.0,
             velocity_mps: 0.0,
+            jettisoned: false,
         };
         let env = Environment::default();
         propulsion.tick(1.0, &env);
         assert!((propulsion.velocity_mps - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn jettisoning_zeroes_thrust() {
+        let mut propulsion = Propulsion {
+            thrust_n: 100_000.0,
+            velocity_mps: 0.0,
+            jettisoned: false,
+        };
+        let args = CommandArgs::new();
+        propulsion.apply("jettison", &args).unwrap();
+        assert_eq!(propulsion.thrust_n, 0.0);
+        assert!(propulsion.jettisoned);
     }
 
     #[test]

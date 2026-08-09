@@ -60,6 +60,7 @@ impl Subsystem for LifeSupport {
         let mut args: BTreeMap<String, Option<ArgRange>> = BTreeMap::new();
         args.insert("rate".into(), Some(ArgRange { min: 0.0, max: 1.0 }));
         spec.insert("set_scrubber_rate".into(), args);
+        spec.insert("vent".into(), BTreeMap::new());
         spec
     }
 
@@ -70,6 +71,10 @@ impl Subsystem for LifeSupport {
                     .get("rate")
                     .ok_or_else(|| ApplyError::MissingArg("rate".into()))?;
                 self.scrubber_rate = *rate;
+                Ok(())
+            }
+            "vent" => {
+                self.o2_level = 0.0;
                 Ok(())
             }
             other => Err(ApplyError::UnknownVerb(other.into())),
@@ -114,5 +119,13 @@ mod tests {
         let names: Vec<_> = life_support.sample().into_iter().map(|s| s.name).collect();
         assert!(names.contains(&"sys.life_support.o2_level".to_string()));
         assert!(names.contains(&"sys.life_support.crew_aboard".to_string()));
+    }
+
+    #[test]
+    fn venting_zeroes_o2_level() {
+        let mut life_support = LifeSupport::default();
+        let args = CommandArgs::new();
+        life_support.apply("vent", &args).unwrap();
+        assert_eq!(life_support.o2_level, 0.0);
     }
 }

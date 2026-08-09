@@ -14,6 +14,8 @@ pub const THERMAL_CEILING_K: f64 = 1200.0;
 pub struct Reactor {
     pub core_temp_k: f64,
     pub output_level: f64,
+    /// Set by the `scuttle` verb. A scuttled reactor produces no more heat.
+    pub scuttled: bool,
 }
 
 impl Default for Reactor {
@@ -21,6 +23,7 @@ impl Default for Reactor {
         Self {
             core_temp_k: 300.0,
             output_level: 0.2,
+            scuttled: false,
         }
     }
 }
@@ -31,7 +34,11 @@ impl Subsystem for Reactor {
     }
 
     fn tick(&mut self, dt: f64, env: &Environment) {
-        let heating = self.output_level * 50.0;
+        let heating = if self.scuttled {
+            0.0
+        } else {
+            self.output_level * 50.0
+        };
         let radiative_loss = (self.core_temp_k - env.ambient_temp_k) * 0.01;
         self.core_temp_k += (heating - radiative_loss) * dt;
         self.core_temp_k = self.core_temp_k.min(THERMAL_CEILING_K);
@@ -47,6 +54,10 @@ impl Subsystem for Reactor {
                 name: "sys.reactor.output_level".into(),
                 value: self.output_level,
             },
+            RawSample {
+                name: "sys.reactor.scuttled".into(),
+                value: if self.scuttled { 1.0 } else { 0.0 },
+            },
         ]
     }
 
@@ -55,6 +66,7 @@ impl Subsystem for Reactor {
         let mut args: BTreeMap<String, Option<ArgRange>> = BTreeMap::new();
         args.insert("level".into(), Some(ArgRange { min: 0.0, max: 1.0 }));
         spec.insert("set_output".into(), args);
+        spec.insert("scuttle".into(), BTreeMap::new());
         spec
     }
 
@@ -65,6 +77,11 @@ impl Subsystem for Reactor {
                     .get("level")
                     .ok_or_else(|| ApplyError::MissingArg("level".into()))?;
                 self.output_level = *level;
+                Ok(())
+            }
+            "scuttle" => {
+                self.scuttled = true;
+                self.output_level = 0.0;
                 Ok(())
             }
             other => Err(ApplyError::UnknownVerb(other.into())),
@@ -95,10 +112,23 @@ mod tests {
         let mut reactor = Reactor {
             core_temp_k: THERMAL_CEILING_K,
             output_level: 1.0,
+            scuttled: false,
         };
         let env = Environment::default();
         reactor.tick(10.0, &env);
         assert!(reactor.core_temp_k <= THERMAL_CEILING_K);
+    }
+
+    #[test]
+    fn scuttling_stops_further_heating() {
+        let mut reactor = Reactor::default();
+        let env = Environment::default();
+        let args = CommandArgs::new();
+        reactor.apply("scuttle", &args).unwrap();
+
+        let before = reactor.core_temp_k;
+        reactor.tick(1.0, &env);
+        assert!(reactor.core_temp_k <= before);
     }
 
     #[test]
@@ -122,8 +152,8 @@ mod tests {
         let mut reactor = Reactor::default();
         let args = CommandArgs::new();
         assert_eq!(
-            reactor.apply("scuttle", &args),
-            Err(ApplyError::UnknownVerb("scuttle".into()))
+            reactor.apply("self_destruct", &args),
+            Err(ApplyError::UnknownVerb("self_destruct".into()))
         );
     }
 }

@@ -4,4 +4,6 @@ pub mod clock;
 pub mod world;
 pub mod telemetry;
 pub mod subsystems;
+pub mod command;
+pub mod safety;
 pub mod ship;

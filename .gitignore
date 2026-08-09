@@ -20,5 +20,10 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Local linker workaround (this machine has no MSVC Build Tools installed;
+# it defaults Cargo to the GNU target instead). Do not commit — other
+# machines may have the MSVC toolchain and shouldn't be forced onto GNU.
+.cargo/
+
 # Claude AI
 plans

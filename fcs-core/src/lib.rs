@@ -9,4 +9,5 @@ pub mod safety;
 pub mod fdir;
 pub mod autopilot;
 pub mod watchdog;
+pub mod recorder;
 pub mod ship;

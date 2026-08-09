@@ -10,6 +10,7 @@ use crate::autopilot;
 use crate::clock::Clock;
 use crate::command::{Command, Target};
 use crate::fdir::{self, Fault, OperatingMode};
+use crate::recorder::{self, CommandOutcome, Recorder, TickRecord};
 use crate::safety::{AuthorizationTable, AutonomyLevel, SafetyKernel, ShipView, Verdict};
 use crate::subsystems::{Comms, LifeSupport, Navigation, Propulsion, Reactor, Subsystem};
 use crate::telemetry::{ChannelStatus, RawSample, TelemetrySampler, TelemetrySnapshot};
@@ -29,6 +30,7 @@ pub struct Ship {
     pub autonomy: AutonomyLevel,
     pub mode: OperatingMode,
     pub faults: BTreeSet<Fault>,
+    pub recorder: Recorder,
 }
 
 impl Ship {
@@ -46,6 +48,7 @@ impl Ship {
             autonomy: AutonomyLevel::Assist,
             mode: OperatingMode::Nominal,
             faults: BTreeSet::new(),
+            recorder: Recorder::new(),
         }
     }
 
@@ -90,12 +93,22 @@ impl Ship {
     }
 
     /// Runs `command` through the safety kernel and, if approved, applies it.
-    /// Every command source — autopilot included — goes through this same path.
-    fn review_and_apply(&mut self, command: &Command) {
-        let verdict = self.kernel.review(command, &self.view(), self.autonomy);
-        if verdict == Verdict::Approved {
+    /// Every command source — autopilot included — goes through this same
+    /// path. `applied` reflects what actually happened, not just the
+    /// verdict, so the recorder never claims a command took effect if
+    /// `apply` itself failed.
+    fn review_and_apply(&mut self, command: Command) -> CommandOutcome {
+        let verdict = self.kernel.review(&command, &self.view(), self.autonomy);
+        let applied = if verdict == Verdict::Approved {
             let subsystem = self.subsystem_mut(command.target);
-            let _ = subsystem.apply(&command.verb, &command.args);
+            subsystem.apply(&command.verb, &command.args).is_ok()
+        } else {
+            false
+        };
+        CommandOutcome {
+            command,
+            verdict,
+            applied,
         }
     }
 
@@ -132,15 +145,25 @@ impl Ship {
         }
 
         let snapshot = self.telemetry.sample(tick_count, elapsed, raw);
+        let telemetry_digest = recorder::telemetry_digest(&snapshot);
 
         self.faults = fdir::detect(&snapshot);
         self.mode = OperatingMode::from_faults(&self.faults);
 
+        let mut command_outcomes = Vec::new();
         if self.mode == OperatingMode::SafeHold {
             for command in autopilot::plan(self.mode, &self.faults) {
-                self.review_and_apply(&command);
+                command_outcomes.push(self.review_and_apply(command));
             }
         }
+
+        self.recorder.record(TickRecord {
+            tick_count,
+            telemetry_digest,
+            mode: self.mode,
+            faults: self.faults.clone(),
+            command_outcomes,
+        });
 
         snapshot
     }
@@ -260,5 +283,45 @@ mod tests {
         assert_eq!(ship.mode, OperatingMode::Nominal);
         assert!(ship.faults.is_empty());
         assert!(ship.reactor.core_temp_k < THERMAL_CEILING_K);
+    }
+
+    #[test]
+    fn recorded_flight_data_is_replayable() {
+        let run = || {
+            let mut ship = Ship::new(1.0);
+            for _ in 0..20 {
+                ship.tick();
+            }
+            ship.recorder
+        };
+
+        assert_eq!(run(), run());
+    }
+
+    /// Replay must hold through the more interesting case too: a fault
+    /// forcing SafeHold and the autopilot actually reviewing and applying
+    /// commands, not just the quiet nominal path.
+    #[test]
+    fn recorded_flight_data_is_replayable_through_a_safe_hold_recovery() {
+        let run = || {
+            let mut ship = Ship::new(1.0);
+            ship.reactor.core_temp_k = THERMAL_CEILING_K;
+            ship.reactor.output_level = 1.0;
+            for _ in 0..10 {
+                ship.tick();
+            }
+            ship.recorder
+        };
+
+        let a = run();
+        let b = run();
+        assert_eq!(a, b);
+
+        let first_tick = &a.records()[0];
+        assert!(first_tick.faults.contains(&Fault::ReactorOvertemp));
+        assert_eq!(first_tick.mode, OperatingMode::SafeHold);
+        assert_eq!(first_tick.command_outcomes.len(), 1);
+        assert!(first_tick.command_outcomes[0].applied);
+        assert_eq!(first_tick.command_outcomes[0].verdict, Verdict::Approved);
     }
 }

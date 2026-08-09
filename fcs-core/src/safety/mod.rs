@@ -125,6 +125,20 @@ impl AuthorizationTable {
             .get(&role)
             .is_some_and(|granted| granted.contains(&(target, verb.to_string())))
     }
+
+    /// Grants the autopilot the benign, non-destructive verbs it needs to
+    /// safe the ship in `SafeHold`. It is never granted the physical-key
+    /// verbs (`vent`/`jettison`/`scuttle`) — those stay operator-only, and
+    /// authorization is checked like any other command's, even for the
+    /// autopilot.
+    pub fn with_autopilot_defaults() -> Self {
+        let mut table = Self::new();
+        table.grant(Role::Autopilot, Target::Reactor, "set_output");
+        table.grant(Role::Autopilot, Target::LifeSupport, "set_scrubber_rate");
+        table.grant(Role::Autopilot, Target::Propulsion, "set_thrust");
+        table.grant(Role::Autopilot, Target::Comms, "set_transmit_power");
+        table
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -5,6 +5,10 @@ use crate::world::Environment;
 
 use super::{ApplyError, ArgRange, CommandArgs, CommandSpec, Subsystem};
 
+/// Minimum signal strength still considered a usable link. Phase 3's fault
+/// monitor checks this to detect comms loss.
+pub const MIN_USABLE_SIGNAL_STRENGTH: f64 = 0.1;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Comms {
     pub signal_strength: f64,

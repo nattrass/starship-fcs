@@ -13,6 +13,10 @@
 //! networked adapters arrive later behind the `online` feature, implementing
 //! this same trait without the kernel, actors, or subsystems changing.
 
+pub mod mock;
+
+pub use mock::MockProvider;
+
 use std::fmt;
 
 use crate::watchdog::TurnFailure;

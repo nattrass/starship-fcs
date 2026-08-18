@@ -135,7 +135,12 @@ mod tests {
     fn declares_set_output_bounded_to_the_unit_range() {
         let reactor = Reactor::default();
         let spec = reactor.commands();
-        let range = spec.get("set_output").unwrap().get("level").unwrap().unwrap();
+        let range = spec
+            .get("set_output")
+            .unwrap()
+            .get("level")
+            .unwrap()
+            .unwrap();
         assert_eq!(range, ArgRange { min: 0.0, max: 1.0 });
     }
 

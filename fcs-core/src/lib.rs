@@ -11,5 +11,6 @@ pub mod autopilot;
 pub mod watchdog;
 pub mod protocol;
 pub mod provider;
+pub mod actors;
 pub mod recorder;
 pub mod ship;

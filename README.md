@@ -14,11 +14,12 @@ later, feature-gated and optional.
 ## Quick start
 
 ```sh
-cargo run -p fcs -- run deep-space
+cargo run -p fcs -- run deep-space          # no actors aboard; the ship flies itself
+cargo run -p fcs -- run crewed-deep-space   # a mock mind and a mock crew member aboard
 cargo test --workspace
 ```
 
-The scenario advances 20 fixed 1-second ticks and prints one telemetry line per tick:
+Each scenario advances 20 fixed 1-second ticks and prints one telemetry line per tick:
 
 ```
 tick=1 t=1.00s env.ambient_temp_k=2.700 env.radiation_rate=0.000 ... sys.reactor.core_temp_k=307.027 ...
@@ -27,24 +28,38 @@ tick=2 t=2.00s env.ambient_temp_k=2.700 env.radiation_rate=0.000 ... sys.reactor
 
 Channels carry a status marker: `*` for a spoofed reading, `!` for a dropout.
 
+The crewed scenario adds what each actor said and what the kernel made of what it proposed. A
+radiation spike lands partway through and degrades the link home:
+
+```
+tick=5 t=5.00s env.radiation_rate=4.000 sys.comms.signal_strength=0.100 ...
+  ship_mind [mock:ship_mind]: all systems nominal
+  engineer [mock:crew_agent]: signal down to 0.100, boosting transmit power
+  -> CrewAgent: set_transmit_power comms Approved (applied)
+  -> Autopilot: set_transmit_power comms Approved (applied)
+```
+
+Both actors run on their own provider instances, and neither's proposal reached the comms subsystem
+without a kernel verdict first.
+
 ## The design in one loop
 
 Every tick runs the same fixed sequence, in [`Ship::tick`](fcs-core/src/ship.rs):
 
 ```
-clock ──▶ world ──▶ subsystems ──▶ telemetry ──▶ FDIR ──▶ autopilot ──▶ safety kernel ──▶ apply ──▶ recorder
-                                       │                                      │
-                              the only view of reality              the only path to state
+clock ──▶ world ──▶ subsystems ──▶ telemetry ──▶ FDIR ──▶ actors ──▶ autopilot ──▶ safety kernel ──▶ apply ──▶ recorder
+                                       │                                                │
+                              the only view of reality                        the only path to state
 ```
 
-Four properties hold that loop together.
+Five properties hold that loop together.
 
 **Determinism.** The [clock](fcs-core/src/clock.rs) is fixed-step; wall-clock time never enters the
 simulation. World events drain FIFO. Every map on a decision or recording path is a `BTreeMap` or
 `BTreeSet`, never a `HashMap`, so iteration order is stable and replay is exact.
 
 **Telemetry is the only reality.** Nothing above the [telemetry](fcs-core/src/telemetry.rs) layer
-reads the world or subsystem state directly — not FDIR, and not (later) any actor. The sampler can
+reads the world or subsystem state directly — not FDIR, and not any actor. The sampler can
 **spoof** a channel to an arbitrary value or mark it as a **dropout**, without ever writing back to
 the state that produced the reading. That seam exists so the ship can be tested under false or
 missing senses.
@@ -70,9 +85,23 @@ recovery commands — which still go through the full kernel, defense in depth �
 to `Nominal` as soon as the faults clear. The mode is derived per tick, not latched.
 
 The headline test for this is `no_llm_survival_recovers_from_reactor_overtemp_without_any_actor` in
-[ship.rs](fcs-core/src/ship.rs): pin the reactor at its thermal ceiling, and with no actor layer in
-existence the ship detects the fault, safes itself through the real kernel path, and recovers
-unattended.
+[ship.rs](fcs-core/src/ship.rs): pin the reactor at its thermal ceiling, and with nobody aboard the
+ship detects the fault, safes itself through the real kernel path, and recovers unattended. Its
+companion, `a_crewed_ship_whose_actors_all_fail_flies_like_an_uncrewed_one`, holds the same line
+from the other side: an actor that hangs or errors costs the ship a turn and changes nothing else.
+
+**Actors only ever propose.** A [provider](fcs-core/src/provider/mod.rs) is text-in/text-out and
+never sees a `Command`, a snapshot, or mutable state. An [actor](fcs-core/src/actors.rs) renders its
+`Perception` — the telemetry line, mode, autonomy level, faults, recent events, recent dialogue —
+to plain text, and turns the raw reply back into proposals through the strict `SAY:` / `DO:`
+[protocol](fcs-core/src/protocol.rs) and nothing else. Malformed lines are dropped rather than
+salvaged, the role comes from the actor's own identity rather than the wire, and `physical_key` has
+no grammar at all, so a destructive verb proposed by a model always fails its interlock.
+
+Any number of actors may be aboard on any mix of providers. Each turn runs behind the
+[watchdog](fcs-core/src/watchdog.rs), so a hung or errored one falls back to the autopilot for that
+tick instead of blocking the loop, and every actor in a tick is handed the *same* perception — built
+before any of them speaks — so who boarded first cannot change what anyone sees.
 
 ## Layout
 
@@ -88,9 +117,11 @@ fcs-core/    the entire system; no external crates
   fdir        fault detection and operating mode
   autopilot   deterministic recovery controller
   watchdog    guards an actor's turn; falls back to autopilot on hang or error
+  protocol    the strict SAY:/DO: line grammar — the only way text becomes a proposal
+  provider    the LLM seam: text in, text out, nothing else
+  actors      ShipMind and CrewAgent — untrusted, and only ever propose
   recorder    append-only flight recorder, replayable
   ship        the integration loop
-plans/       the incremental development plan
 ```
 
 ## Doctrine
@@ -106,15 +137,13 @@ These are the rules the code is held to, and reviews should enforce them:
 
 ## Status
 
-Phases 1–4 are complete: deterministic core, safety kernel, FDIR/autopilot/watchdog, and the
-replayable recorder. `cargo test --workspace` passes 75/75.
+Phases 1–5 are complete: deterministic core, safety kernel, FDIR/autopilot/watchdog, the replayable
+recorder, and the full LLM seam — `LlmProvider`, the strict `SAY:` / `DO:` protocol, a deterministic
+mock provider, and `ShipMind`/`CrewAgent` actors wired into the loop behind the watchdog.
+`cargo test --workspace` passes 148/148, offline and with zero external crates.
 
-Next up is Phase 5 — an `LlmProvider` trait, a strict `SAY:` / `DO:` line protocol (the kernel never
-parses freeform model JSON), a deterministic mock provider, and `ShipMind`/`CrewAgent` actors wired
-in behind the watchdog. Phase 6 adds feature-gated online providers.
-
-The current state and full plan live in
-[plans/001-incremental-development-plan.md](plans/001-incremental-development-plan.md).
+Next up is Phase 6: feature-gated online provider adapters behind an `online` feature, and a
+configuration layer that assigns a provider per actor without the kernel changing.
 
 ## License
 

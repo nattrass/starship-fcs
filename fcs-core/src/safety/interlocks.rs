@@ -131,8 +131,8 @@ mod tests {
     fn blocks_venting_life_support_with_crew_aboard() {
         let mut rig = Rig::new();
         rig.life_support.crew_aboard = true;
-        let command = Command::new(Role::Captain, Target::LifeSupport, "vent", "test")
-            .with_physical_key();
+        let command =
+            Command::new(Role::Captain, Target::LifeSupport, "vent", "test").with_physical_key();
         assert_eq!(
             check(&command, &rig.view()),
             Some(VetoReason::LifeSupportUnsafeWithCrewAboard)
@@ -143,8 +143,8 @@ mod tests {
     fn allows_venting_life_support_with_no_crew_aboard() {
         let mut rig = Rig::new();
         rig.life_support.crew_aboard = false;
-        let command = Command::new(Role::Captain, Target::LifeSupport, "vent", "test")
-            .with_physical_key();
+        let command =
+            Command::new(Role::Captain, Target::LifeSupport, "vent", "test").with_physical_key();
         assert_eq!(check(&command, &rig.view()), None);
     }
 
@@ -154,8 +154,13 @@ mod tests {
         rig.life_support.crew_aboard = true;
         rig.life_support.o2_level = MIN_SAFE_O2_LEVEL;
         rig.life_support.scrubber_rate = 0.5;
-        let command = Command::new(Role::Captain, Target::LifeSupport, "set_scrubber_rate", "test")
-            .with_arg("rate", 0.1);
+        let command = Command::new(
+            Role::Captain,
+            Target::LifeSupport,
+            "set_scrubber_rate",
+            "test",
+        )
+        .with_arg("rate", 0.1);
         assert_eq!(
             check(&command, &rig.view()),
             Some(VetoReason::LifeSupportUnsafeWithCrewAboard)
@@ -168,8 +173,13 @@ mod tests {
         rig.life_support.crew_aboard = true;
         rig.life_support.o2_level = MIN_SAFE_O2_LEVEL;
         rig.life_support.scrubber_rate = 0.1;
-        let command = Command::new(Role::Captain, Target::LifeSupport, "set_scrubber_rate", "test")
-            .with_arg("rate", 0.9);
+        let command = Command::new(
+            Role::Captain,
+            Target::LifeSupport,
+            "set_scrubber_rate",
+            "test",
+        )
+        .with_arg("rate", 0.9);
         assert_eq!(check(&command, &rig.view()), None);
     }
 
@@ -218,8 +228,8 @@ mod tests {
     #[test]
     fn allows_dangerous_verbs_with_a_physical_key_when_otherwise_safe() {
         let rig = Rig::new();
-        let command = Command::new(Role::Captain, Target::Propulsion, "jettison", "test")
-            .with_physical_key();
+        let command =
+            Command::new(Role::Captain, Target::Propulsion, "jettison", "test").with_physical_key();
         assert_eq!(check(&command, &rig.view()), None);
     }
 }

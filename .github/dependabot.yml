@@ -1,0 +1,9 @@
+version: 2
+
+# Only the Actions ecosystem is watched. The Rust side is deliberately
+# dependency-free, and CI fails if that ever stops being true.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

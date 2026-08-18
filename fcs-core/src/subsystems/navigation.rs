@@ -55,7 +55,10 @@ impl Subsystem for Navigation {
         let mut args: BTreeMap<String, Option<ArgRange>> = BTreeMap::new();
         args.insert(
             "heading_deg".into(),
-            Some(ArgRange { min: 0.0, max: 360.0 }),
+            Some(ArgRange {
+                min: 0.0,
+                max: 360.0,
+            }),
         );
         spec.insert("set_heading".into(), args);
         spec

@@ -31,18 +31,30 @@ const CHANNEL_SIGNAL: &str = "sys.comms.signal_strength";
 pub fn detect(snapshot: &TelemetrySnapshot) -> BTreeSet<Fault> {
     let mut faults = BTreeSet::new();
 
-    check_channel(snapshot, CHANNEL_REACTOR_TEMP, Fault::ReactorOvertemp, &mut faults, |v| {
-        v >= THERMAL_CEILING_K
-    });
+    check_channel(
+        snapshot,
+        CHANNEL_REACTOR_TEMP,
+        Fault::ReactorOvertemp,
+        &mut faults,
+        |v| v >= THERMAL_CEILING_K,
+    );
     check_channel(snapshot, CHANNEL_O2_LEVEL, Fault::O2Low, &mut faults, |v| {
         v <= MIN_SAFE_O2_LEVEL
     });
-    check_channel(snapshot, CHANNEL_PRESSURE, Fault::PressureLoss, &mut faults, |v| {
-        v <= MIN_SAFE_PRESSURE_KPA
-    });
-    check_channel(snapshot, CHANNEL_SIGNAL, Fault::CommsLoss, &mut faults, |v| {
-        v <= MIN_USABLE_SIGNAL_STRENGTH
-    });
+    check_channel(
+        snapshot,
+        CHANNEL_PRESSURE,
+        Fault::PressureLoss,
+        &mut faults,
+        |v| v <= MIN_SAFE_PRESSURE_KPA,
+    );
+    check_channel(
+        snapshot,
+        CHANNEL_SIGNAL,
+        Fault::CommsLoss,
+        &mut faults,
+        |v| v <= MIN_USABLE_SIGNAL_STRENGTH,
+    );
 
     faults
 }
@@ -155,7 +167,10 @@ mod tests {
 
     #[test]
     fn mode_is_nominal_with_no_faults_and_safe_hold_with_any_fault() {
-        assert_eq!(OperatingMode::from_faults(&BTreeSet::new()), OperatingMode::Nominal);
+        assert_eq!(
+            OperatingMode::from_faults(&BTreeSet::new()),
+            OperatingMode::Nominal
+        );
 
         let mut faults = BTreeSet::new();
         faults.insert(Fault::O2Low);

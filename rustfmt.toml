@@ -1,0 +1,4 @@
+# Default rustfmt, with one exception: the `mod` list in lib.rs is ordered to
+# match the tick pipeline (clock -> world -> telemetry -> ... -> recorder ->
+# ship), which documents the architecture. Alphabetizing it would lose that.
+reorder_modules = false

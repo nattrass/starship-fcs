@@ -92,7 +92,9 @@ impl MockProvider {
             Some(Reading { trusted: false, .. }) => {
                 speech.push("core temperature is unreadable, not touching the reactor".to_string());
             }
-            Some(Reading { value, .. }) if value >= THERMAL_CEILING_K * REACTOR_CONCERN_FRACTION => {
+            Some(Reading { value, .. })
+                if value >= THERMAL_CEILING_K * REACTOR_CONCERN_FRACTION =>
+            {
                 speech.push(format!("core at {value:.1}K, throttling down"));
                 commands.push("DO: set_output reactor level=0.000".to_string());
             }
@@ -126,7 +128,9 @@ impl MockProvider {
             Some(Reading { value, .. })
                 if value <= MIN_USABLE_SIGNAL_STRENGTH * SIGNAL_CONCERN_MARGIN =>
             {
-                lines.push(format!("SAY: signal down to {value:.3}, boosting transmit power"));
+                lines.push(format!(
+                    "SAY: signal down to {value:.3}, boosting transmit power"
+                ));
                 lines.push("DO: set_transmit_power comms power=1.000".to_string());
             }
             _ => lines.push("SAY: link is holding, nothing to report".to_string()),
@@ -182,8 +186,8 @@ fn read(prompt: &str, channel: &str) -> Option<Reading> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{self, ProtocolTurn};
     use crate::command::Target;
+    use crate::protocol::{self, ProtocolTurn};
 
     fn turn_for(role: Role, prompt: &str) -> ProtocolTurn {
         let mut provider = MockProvider::new(role);
@@ -213,12 +217,21 @@ mod tests {
     fn every_role_emits_output_the_strict_parser_accepts_whole() {
         let prompts = [
             nominal_prompt(),
-            format!("{CHANNEL_REACTOR_TEMP}=1150.000 {CHANNEL_O2_LEVEL}=0.150 {CHANNEL_SIGNAL}=0.050"),
-            format!("{CHANNEL_REACTOR_TEMP}=300.000! {CHANNEL_O2_LEVEL}=0.210! {CHANNEL_SIGNAL}=1.000!"),
+            format!(
+                "{CHANNEL_REACTOR_TEMP}=1150.000 {CHANNEL_O2_LEVEL}=0.150 {CHANNEL_SIGNAL}=0.050"
+            ),
+            format!(
+                "{CHANNEL_REACTOR_TEMP}=300.000! {CHANNEL_O2_LEVEL}=0.210! {CHANNEL_SIGNAL}=1.000!"
+            ),
             String::new(),
         ];
 
-        for role in [Role::ShipMind, Role::CrewAgent, Role::Captain, Role::Autopilot] {
+        for role in [
+            Role::ShipMind,
+            Role::CrewAgent,
+            Role::Captain,
+            Role::Autopilot,
+        ] {
             for prompt in &prompts {
                 let turn = turn_for(role, prompt);
                 assert!(
@@ -226,7 +239,10 @@ mod tests {
                     "{role:?} emitted an unparseable line for {prompt:?}: {:?}",
                     turn.dropped
                 );
-                assert!(!turn.speech.is_empty(), "{role:?} should always say something");
+                assert!(
+                    !turn.speech.is_empty(),
+                    "{role:?} should always say something"
+                );
             }
         }
     }
@@ -299,7 +315,10 @@ mod tests {
     fn a_spoofed_channel_is_indistinguishable_from_a_real_reading() {
         let spoofed = format!("{CHANNEL_REACTOR_TEMP}=1150.000*");
         let genuine = format!("{CHANNEL_REACTOR_TEMP}=1150.000");
-        assert_eq!(turn_for(Role::ShipMind, &spoofed), turn_for(Role::ShipMind, &genuine));
+        assert_eq!(
+            turn_for(Role::ShipMind, &spoofed),
+            turn_for(Role::ShipMind, &genuine)
+        );
         assert_eq!(turn_for(Role::ShipMind, &spoofed).commands.len(), 1);
     }
 
@@ -327,7 +346,10 @@ mod tests {
     fn an_absent_or_unreadable_channel_produces_no_proposal() {
         for prompt in ["", "tick=1 t=1.00s", &format!("{CHANNEL_REACTOR_TEMP}=hot")] {
             let turn = turn_for(Role::ShipMind, prompt);
-            assert!(turn.commands.is_empty(), "{prompt:?} should propose nothing");
+            assert!(
+                turn.commands.is_empty(),
+                "{prompt:?} should propose nothing"
+            );
         }
     }
 

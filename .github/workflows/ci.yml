@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: Format, lint, docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # The modules carry the architecture in their doc comments and link to
+      # each other, so a broken intra-doc link is a broken explanation.
+      - name: Docs
+        run: cargo doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  test:
+    # The simulation is meant to be bit-for-bit reproducible, and floating-point
+    # behavior is the most likely place for that to quietly stop being true, so
+    # the suite runs on all three platforms rather than just Linux.
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+
+  doctrine:
+    # Guards the invariants in README.md's Doctrine section that the compiler
+    # cannot enforce on its own. Each one is cheap; each one has already been
+    # written down as a rule the project is held to.
+    name: Doctrine guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Core depends on zero external crates
+        run: |
+          if grep -q '^source = ' Cargo.lock; then
+            echo "::error file=Cargo.lock::Cargo.lock contains a package from an external source. The core must build with zero external crates; online provider dependencies must be optional and behind the 'online' feature."
+            grep -n -B 2 '^source = ' Cargo.lock
+            exit 1
+          fi
+          packages=$(grep '^name = ' Cargo.lock | tr -d '"' | sed 's/^name = //' | sort | tr '\n' ' ')
+          if [ "$packages" != "fcs fcs-core " ]; then
+            echo "::error file=Cargo.lock::Expected only the workspace members in Cargo.lock, found: $packages"
+            exit 1
+          fi
+
+      - name: Builds and tests with no network access
+        run: cargo test --workspace --locked --offline
+
+      - name: Every crate root forbids unsafe code
+        run: |
+          for root in fcs-core/src/lib.rs fcs/src/main.rs; do
+            if ! grep -q '#!\[forbid(unsafe_code)\]' "$root"; then
+              echo "::error file=$root::missing #![forbid(unsafe_code)]"
+              exit 1
+            fi
+          done
+
+      - name: No hash-ordered collections on the decision or recording path
+        run: |
+          if grep -rn --include='*.rs' -E '\bHash(Map|Set)\b' fcs-core/src fcs/src; then
+            echo "::error::Hash-ordered collections make replay non-deterministic. Use BTreeMap/BTreeSet/Vec instead."
+            exit 1
+          fi
+
+      - name: A scenario replays identically
+        run: |
+          cargo run --quiet --locked -p fcs -- run deep-space > first.txt
+          cargo run --quiet --locked -p fcs -- run deep-space > second.txt
+          if ! diff -u first.txt second.txt; then
+            echo "::error::Two runs of the same scenario diverged. The core must be deterministic."
+            exit 1
+          fi

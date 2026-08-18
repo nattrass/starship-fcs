@@ -66,8 +66,12 @@ mod tests {
     #[test]
     fn queued_events_apply_deterministically_in_order() {
         let mut world = World::new();
-        world.push_event(WorldEvent::RadiationSpike { magnitude_milli: 500 });
-        world.push_event(WorldEvent::RadiationSpike { magnitude_milli: 250 });
+        world.push_event(WorldEvent::RadiationSpike {
+            magnitude_milli: 500,
+        });
+        world.push_event(WorldEvent::RadiationSpike {
+            magnitude_milli: 250,
+        });
 
         world.tick(1.0);
 

@@ -5,9 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```sh
-cargo run -p fcs -- run deep-space     # the only scenario; 20 fixed 1s ticks, one report line each
-cargo test --workspace                 # full suite (all tests are colocated unit tests)
-cargo clippy --workspace --all-targets # expected to be warning-clean
+cargo run -p fcs -- run deep-space          # no actors; 20 fixed 1s ticks, one report line each
+cargo run -p fcs -- run crewed-deep-space   # same flight with a mock mind and crew member aboard
+cargo test --workspace                      # full suite (all tests are colocated unit tests)
+cargo clippy --workspace --all-targets      # expected to be warning-clean
 ```
 
 Run a single test or a module's tests by path — tests live inside the crate, so filter on the module:
@@ -34,7 +35,7 @@ and what comes next. Each step must leave the workspace compiling and the suite 
 Every tick runs one fixed sequence in [`Ship::tick`](fcs-core/src/ship.rs):
 
 ```
-clock ──▶ world ──▶ subsystems ──▶ telemetry ──▶ FDIR ──▶ (actors) ──▶ autopilot ──▶ safety kernel ──▶ apply ──▶ recorder
+clock ──▶ world ──▶ subsystems ──▶ telemetry ──▶ FDIR ──▶ actors ──▶ autopilot ──▶ safety kernel ──▶ apply ──▶ recorder
 ```
 
 Two seams carry the whole design, and most review comments come back to one of them:
@@ -56,6 +57,19 @@ malformed rather than salvaging it. The role is supplied by the caller rather th
 wire, `physical_key` has no grammar at all, and non-finite args are rejected there — a `NaN` would
 otherwise pass the kernel's range check, since every `NaN` comparison is false. A failing provider
 becomes a watchdog `TurnFailure` and the tick falls back to the autopilot.
+
+[Actors](fcs-core/src/actors.rs) sit on that seam: `ShipMind` and `CrewAgent` render a `Perception`
+to plain text, hand it to their own provider instance, and parse the reply back through `protocol`
+and nothing else. Two invariants there are load-bearing and easy to break by accident:
+
+- **Every actor in a tick gets the same `Perception`**, built once before any of them speaks, and
+  their speech only joins the dialogue after the last one has. Building it per-actor, or folding
+  speech in as you go, would make boarding order change what actors see and break replay.
+- **What an actor is shown is a window, not a transcript** (`MAX_RECENT_DIALOGUE`,
+  `MAX_RECENT_EVENTS`). An unbounded history would make behavior depend on flight length.
+
+The prompt's command vocabulary comes from `actors::command_contract()`, which reads the subsystems'
+own `commands()` schemas — don't hand-write a verb or a range into a prompt.
 
 Physical limits (`THERMAL_CEILING_K`, `MIN_SAFE_O2_LEVEL`, `MIN_USABLE_SIGNAL_STRENGTH`, …) are
 declared as `pub const` next to the subsystem that owns them, and FDIR, the interlocks, the autopilot

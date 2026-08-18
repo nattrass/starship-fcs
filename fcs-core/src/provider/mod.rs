@@ -150,7 +150,10 @@ mod tests {
     }
 
     fn request() -> ProviderRequest {
-        ProviderRequest::new("you are the ship mind", "tick=1 sys.reactor.core_temp_k=300.000")
+        ProviderRequest::new(
+            "you are the ship mind",
+            "tick=1 sys.reactor.core_temp_k=300.000",
+        )
     }
 
     #[test]
@@ -200,15 +203,15 @@ mod tests {
 
         let result = provider.complete(&request());
 
-        assert_eq!(
-            result,
-            Err(ProviderError::Unavailable("no api key".into()))
-        );
+        assert_eq!(result, Err(ProviderError::Unavailable("no api key".into())));
     }
 
     #[test]
     fn a_provider_timeout_becomes_a_watchdog_timeout() {
-        assert_eq!(TurnFailure::from(ProviderError::TimedOut), TurnFailure::TimedOut);
+        assert_eq!(
+            TurnFailure::from(ProviderError::TimedOut),
+            TurnFailure::TimedOut
+        );
     }
 
     #[test]

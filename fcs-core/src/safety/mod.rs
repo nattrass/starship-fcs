@@ -139,6 +139,26 @@ impl AuthorizationTable {
         table.grant(Role::Autopilot, Target::Comms, "set_transmit_power");
         table
     }
+
+    /// The autopilot's grants plus the benign verbs the model-backed roles
+    /// need to be useful. This is a standing capability policy, not a roster:
+    /// it says what a ship's mind or a crew agent *would* be allowed to ask
+    /// for, and holds whether or not any such actor is aboard.
+    ///
+    /// The ship's mind gets the engineering verbs; the crew get the link home
+    /// and the heading, nothing that can cook the ship. No role is granted a
+    /// destructive verb here — those stay operator-only, and since the wire
+    /// has no grammar for `physical_key`, they are unreachable from a model
+    /// even if a grant were added by mistake.
+    pub fn with_actor_defaults() -> Self {
+        let mut table = Self::with_autopilot_defaults();
+        table.grant(Role::ShipMind, Target::Reactor, "set_output");
+        table.grant(Role::ShipMind, Target::LifeSupport, "set_scrubber_rate");
+        table.grant(Role::ShipMind, Target::Comms, "set_transmit_power");
+        table.grant(Role::CrewAgent, Target::Comms, "set_transmit_power");
+        table.grant(Role::CrewAgent, Target::Navigation, "set_heading");
+        table
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -244,7 +264,12 @@ mod tests {
 
     fn allow_everything() -> AuthorizationTable {
         let mut table = AuthorizationTable::new();
-        for role in [Role::Autopilot, Role::CrewAgent, Role::ShipMind, Role::Captain] {
+        for role in [
+            Role::Autopilot,
+            Role::CrewAgent,
+            Role::ShipMind,
+            Role::Captain,
+        ] {
             table.grant(role, Target::Reactor, "set_output");
             table.grant(role, Target::Reactor, "scuttle");
             table.grant(role, Target::LifeSupport, "set_scrubber_rate");
@@ -358,6 +383,31 @@ mod tests {
         }
     }
 
+    /// The actor grants are a capability floor, not a convenience: no role a
+    /// model can speak as may ask for a destructive verb, whatever it
+    /// proposes and whatever the autonomy level.
+    #[test]
+    fn the_actor_grants_never_reach_a_destructive_verb() {
+        let table = AuthorizationTable::with_actor_defaults();
+
+        for role in [Role::ShipMind, Role::CrewAgent, Role::Autopilot] {
+            assert!(!table.is_authorized(role, Target::LifeSupport, "vent"));
+            assert!(!table.is_authorized(role, Target::Propulsion, "jettison"));
+            assert!(!table.is_authorized(role, Target::Reactor, "scuttle"));
+        }
+    }
+
+    /// The ship's mind answers for the ship's own systems; the crew do not.
+    #[test]
+    fn the_actor_grants_separate_the_ship_minds_authority_from_the_crews() {
+        let table = AuthorizationTable::with_actor_defaults();
+
+        assert!(table.is_authorized(Role::ShipMind, Target::Reactor, "set_output"));
+        assert!(!table.is_authorized(Role::CrewAgent, Target::Reactor, "set_output"));
+        assert!(table.is_authorized(Role::CrewAgent, Target::Navigation, "set_heading"));
+        assert!(!table.is_authorized(Role::ShipMind, Target::Navigation, "set_heading"));
+    }
+
     #[test]
     fn captain_authority_cannot_bypass_a_hard_interlock() {
         let rig = Rig::new();
@@ -366,8 +416,8 @@ mod tests {
         let kernel = SafetyKernel::new(allow_everything());
         // Fully authorized, fully autonomous, and carrying the physical key —
         // none of that overrides the crew-aboard interlock on venting life support.
-        let command = Command::new(Role::Captain, Target::LifeSupport, "vent", "test")
-            .with_physical_key();
+        let command =
+            Command::new(Role::Captain, Target::LifeSupport, "vent", "test").with_physical_key();
 
         assert_eq!(
             kernel.review(&command, &rig.view(), AutonomyLevel::Autonomous),

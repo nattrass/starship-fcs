@@ -47,9 +47,14 @@ pub enum DropReason {
     UnknownTarget(String),
     /// An argument token was not of the form `key=value`.
     MalformedArg(String),
-    NonNumericArg { key: String, value: String },
+    NonNumericArg {
+        key: String,
+        value: String,
+    },
     /// `NaN` or an infinity — rejected before it can defeat a range check.
-    NonFiniteArg { key: String },
+    NonFiniteArg {
+        key: String,
+    },
     DuplicateArg(String),
     /// The turn already proposed [`MAX_COMMANDS_PER_TURN`] commands.
     TooManyCommands,
@@ -229,7 +234,10 @@ mod tests {
 
     #[test]
     fn multiple_args_parse_in_a_single_command() {
-        let turn = parse(Role::Captain, "DO: set_course navigation heading_deg=90 speed=3");
+        let turn = parse(
+            Role::Captain,
+            "DO: set_course navigation heading_deg=90 speed=3",
+        );
         assert_eq!(turn.commands[0].args.get("heading_deg"), Some(&90.0));
         assert_eq!(turn.commands[0].args.get("speed"), Some(&3.0));
     }
@@ -252,7 +260,12 @@ mod tests {
     /// The grammar is strict: near-misses are dropped, not guessed at.
     #[test]
     fn lowercase_and_malformed_directives_are_dropped() {
-        for line in ["say: hello", "do: set_output reactor level=0", "SAY hello", "DO set_output reactor"] {
+        for line in [
+            "say: hello",
+            "do: set_output reactor level=0",
+            "SAY hello",
+            "DO set_output reactor",
+        ] {
             let turn = parse(Role::ShipMind, line);
             assert!(turn.commands.is_empty(), "{line} should propose nothing");
             assert_eq!(turn.dropped.len(), 1, "{line} should be dropped");
@@ -313,8 +326,14 @@ mod tests {
     #[test]
     fn non_finite_arguments_are_rejected_before_they_can_defeat_a_range_check() {
         for value in ["NaN", "nan", "inf", "-inf", "infinity"] {
-            let turn = parse(Role::ShipMind, &format!("DO: set_output reactor level={value}"));
-            assert!(turn.commands.is_empty(), "{value} should not parse into a command");
+            let turn = parse(
+                Role::ShipMind,
+                &format!("DO: set_output reactor level={value}"),
+            );
+            assert!(
+                turn.commands.is_empty(),
+                "{value} should not parse into a command"
+            );
             assert_eq!(
                 turn.dropped[0].reason,
                 DropReason::NonFiniteArg {
@@ -329,7 +348,10 @@ mod tests {
     fn a_repeated_argument_drops_the_whole_line_rather_than_picking_a_winner() {
         let turn = parse(Role::ShipMind, "DO: set_output reactor level=0.0 level=1.0");
         assert!(turn.commands.is_empty());
-        assert_eq!(turn.dropped[0].reason, DropReason::DuplicateArg("level".into()));
+        assert_eq!(
+            turn.dropped[0].reason,
+            DropReason::DuplicateArg("level".into())
+        );
     }
 
     /// One bad line does not poison the good ones around it.
@@ -369,7 +391,10 @@ mod tests {
 
     #[test]
     fn pure_garbage_yields_an_empty_turn_rather_than_an_error() {
-        let turn = parse(Role::ShipMind, "{\"tool_use\": {\"name\": \"vent\"}}\n\u{1F680}\n");
+        let turn = parse(
+            Role::ShipMind,
+            "{\"tool_use\": {\"name\": \"vent\"}}\n\u{1F680}\n",
+        );
         assert!(turn.speech.is_empty());
         assert!(turn.commands.is_empty());
         assert_eq!(turn.dropped.len(), 2);

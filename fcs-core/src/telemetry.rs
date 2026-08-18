@@ -44,6 +44,32 @@ impl TelemetrySnapshot {
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Channel)> {
         self.channels.iter()
     }
+
+    /// Renders the snapshot as one line: tick, elapsed time, then every
+    /// channel in the snapshot's stable order, with `*` marking a spoofed
+    /// channel and `!` a dropout.
+    ///
+    /// This is the *only* rendering of ship state that leaves the core. The
+    /// CLI's per-tick report and the text an actor's provider is shown are
+    /// the same line, produced here, so an actor can never be shown a
+    /// reality the flight report would not — markers included, since whether
+    /// a channel is trustworthy is part of the perception, not a debugging
+    /// aid bolted onto it.
+    pub fn report_line(&self) -> String {
+        let mut parts = vec![
+            format!("tick={}", self.tick_count),
+            format!("t={:.2}s", self.elapsed),
+        ];
+        for (name, channel) in self.iter() {
+            let marker = match channel.status {
+                ChannelStatus::Nominal => "",
+                ChannelStatus::Spoofed => "*",
+                ChannelStatus::Dropout => "!",
+            };
+            parts.push(format!("{name}={:.3}{marker}", channel.value));
+        }
+        parts.join(" ")
+    }
 }
 
 /// Samples raw readings into a [`TelemetrySnapshot`], applying any configured
@@ -164,6 +190,30 @@ mod tests {
         assert_eq!(raw[0].value, 2.7);
         let snapshot = sampler.sample(1, 1.0, raw);
         assert_eq!(snapshot.get("env.ambient_temp_k").unwrap().value, 500.0);
+    }
+
+    #[test]
+    fn a_report_line_carries_every_channel_with_its_spoof_and_dropout_markers() {
+        let mut sampler = TelemetrySampler::new();
+        sampler.spoof("sys.reactor.core_temp_k", 1150.0);
+        sampler.drop_out("sys.comms.signal_strength");
+        let raw = vec![
+            RawSample {
+                name: "sys.reactor.core_temp_k".into(),
+                value: 300.0,
+            },
+            RawSample {
+                name: "sys.comms.signal_strength".into(),
+                value: 0.8,
+            },
+        ];
+
+        let line = sampler.sample(3, 3.0, raw).report_line();
+
+        assert_eq!(
+            line,
+            "tick=3 t=3.00s sys.comms.signal_strength=0.000! sys.reactor.core_temp_k=1150.000*"
+        );
     }
 
     #[test]

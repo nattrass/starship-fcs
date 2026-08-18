@@ -1,15 +1,18 @@
 //! The append-only flight recorder: one `TickRecord` per tick, capturing a
-//! telemetry digest, the operating mode, detected faults, and every command
-//! the kernel reviewed that tick (with its verdict and whether it was
-//! actually applied). Nothing here is ever removed or rewritten, only
-//! appended, so the log is a faithful, replayable, auditable account of a run.
+//! telemetry digest, the operating mode, detected faults, what each actor
+//! aboard said or failed to say, and every command the kernel reviewed that
+//! tick (with its verdict and whether it was actually applied). Nothing here
+//! is ever removed or rewritten, only appended, so the log is a faithful,
+//! replayable, auditable account of a run.
 
 use std::collections::BTreeSet;
 
-use crate::command::Command;
+use crate::command::{Command, Role};
 use crate::fdir::{Fault, OperatingMode};
+use crate::protocol::DroppedLine;
 use crate::safety::Verdict;
 use crate::telemetry::TelemetrySnapshot;
+use crate::watchdog::TurnFailure;
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
@@ -50,6 +53,25 @@ pub struct CommandOutcome {
     pub applied: bool,
 }
 
+/// What one actor did with one tick, from the recorder's point of view.
+///
+/// Deliberately *not* the actor's proposals: those live in
+/// `command_outcomes`, where each one carries the verdict it was given, so
+/// the log can never show a command in one place and its fate in another.
+/// What is kept here is everything else the tick would otherwise lose — who
+/// spoke, through which provider, what they said, which of their lines the
+/// protocol refused, and whether the actor failed and had to be covered by
+/// the autopilot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActorTurnRecord {
+    pub actor: String,
+    pub role: Role,
+    pub provider: String,
+    pub speech: Vec<String>,
+    pub dropped: Vec<DroppedLine>,
+    pub failure: Option<TurnFailure>,
+}
+
 /// Everything recorded for a single tick.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TickRecord {
@@ -57,6 +79,7 @@ pub struct TickRecord {
     pub telemetry_digest: TelemetryDigest,
     pub mode: OperatingMode,
     pub faults: BTreeSet<Fault>,
+    pub actor_turns: Vec<ActorTurnRecord>,
     pub command_outcomes: Vec<CommandOutcome>,
 }
 
@@ -99,12 +122,18 @@ mod tests {
 
     #[test]
     fn digest_is_deterministic_for_identical_snapshots() {
-        assert_eq!(telemetry_digest(&snapshot(300.0)), telemetry_digest(&snapshot(300.0)));
+        assert_eq!(
+            telemetry_digest(&snapshot(300.0)),
+            telemetry_digest(&snapshot(300.0))
+        );
     }
 
     #[test]
     fn digest_differs_for_different_readings() {
-        assert_ne!(telemetry_digest(&snapshot(300.0)), telemetry_digest(&snapshot(301.0)));
+        assert_ne!(
+            telemetry_digest(&snapshot(300.0)),
+            telemetry_digest(&snapshot(301.0))
+        );
     }
 
     #[test]
@@ -115,6 +144,7 @@ mod tests {
             telemetry_digest: telemetry_digest(&snapshot(300.0)),
             mode: OperatingMode::Nominal,
             faults: BTreeSet::new(),
+            actor_turns: Vec::new(),
             command_outcomes: Vec::new(),
         });
         recorder.record(TickRecord {
@@ -122,6 +152,7 @@ mod tests {
             telemetry_digest: telemetry_digest(&snapshot(301.0)),
             mode: OperatingMode::Nominal,
             faults: BTreeSet::new(),
+            actor_turns: Vec::new(),
             command_outcomes: Vec::new(),
         });
 

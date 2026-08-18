@@ -3,10 +3,8 @@
 use std::env;
 use std::process::ExitCode;
 
-use fcs_core::actors::{CrewAgent, ShipMind};
-use fcs_core::command::Role;
+use fcs_core::config::{ActorSpec, ProviderKind, ProviderSpec, ShipConfig};
 use fcs_core::protocol::target_to_wire;
-use fcs_core::provider::MockProvider;
 use fcs_core::safety::AutonomyLevel;
 use fcs_core::ship::{format_report, Ship};
 use fcs_core::world::WorldEvent;
@@ -21,11 +19,11 @@ const KNOWN_SCENARIOS: &str = "deep-space, crewed-deep-space";
 const SPIKE_TICK: u32 = 5;
 const SPIKE_MAGNITUDE_MILLI: u64 = 4000;
 
-/// A ship plus the world events to inject, by the tick they land on. Events
-/// are scheduled rather than pushed as the run goes, so a scenario stays a
-/// fixed, replayable description of a flight rather than a script.
+/// A flight: who is aboard and what the world does to them, by the tick it
+/// does it on. Events are scheduled rather than pushed as the run goes, so a
+/// scenario stays a fixed, replayable description rather than a script.
 struct Scenario {
-    ship: Ship,
+    config: ShipConfig,
     events: Vec<(u32, WorldEvent)>,
 }
 
@@ -36,6 +34,11 @@ fn main() -> ExitCode {
         [cmd, scenario] if cmd == "run" => run_scenario(scenario),
         _ => {
             eprintln!("usage: fcs run <scenario>");
+            eprintln!("scenarios: {KNOWN_SCENARIOS}");
+            eprintln!(
+                "environment: FCS_PROVIDER={} FCS_MODEL=<model id>",
+                provider_names().join("|")
+            );
             ExitCode::FAILURE
         }
     }
@@ -51,15 +54,33 @@ fn run_scenario(name: &str) -> ExitCode {
         }
     };
 
-    fly(scenario);
+    let config = match apply_overrides(scenario.config) {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // A provider that cannot be constructed is reported here, before the
+    // flight starts, rather than as a failed turn twenty ticks in.
+    let ship = match config.build() {
+        Ok(ship) => ship,
+        Err(error) => {
+            eprintln!("cannot build the ship: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    fly(ship, &scenario.events);
     ExitCode::SUCCESS
 }
 
-/// The baseline: no actors, no providers, nothing to go wrong that the
-/// autopilot cannot handle alone.
+/// The baseline: nobody aboard, nothing to go wrong that the autopilot cannot
+/// handle alone.
 fn deep_space() -> Scenario {
     Scenario {
-        ship: Ship::new(DEFAULT_DT),
+        config: ShipConfig::new(DEFAULT_DT),
         events: Vec::new(),
     }
 }
@@ -67,22 +88,18 @@ fn deep_space() -> Scenario {
 /// The same flight with a mind and a crew member aboard, each on its own
 /// provider instance, and a radiation spike partway through to give them
 /// something to say. Autonomy is `Autonomous` so their proposals can actually
-/// execute once the kernel has cleared them — which is the whole point of
-/// watching this one run.
+/// execute once the kernel has cleared them — which is the point of watching
+/// this one run.
 fn crewed_deep_space() -> Scenario {
-    let mut ship = Ship::new(DEFAULT_DT);
-    ship.autonomy = AutonomyLevel::Autonomous;
-    ship.board(Box::new(ShipMind::new(Box::new(MockProvider::new(
-        Role::ShipMind,
-    )))));
-    ship.board(Box::new(CrewAgent::new(
-        "engineer",
-        "You mind the link home and speak up the moment it degrades.",
-        Box::new(MockProvider::new(Role::CrewAgent)),
-    )));
-
     Scenario {
-        ship,
+        config: ShipConfig::new(DEFAULT_DT)
+            .with_autonomy(AutonomyLevel::Autonomous)
+            .with_actor(ActorSpec::ship_mind(ProviderSpec::mock()))
+            .with_actor(ActorSpec::crew(
+                "engineer",
+                "You mind the link home and speak up the moment it degrades.",
+                ProviderSpec::mock(),
+            )),
         events: vec![(
             SPIKE_TICK,
             WorldEvent::RadiationSpike {
@@ -92,17 +109,49 @@ fn crewed_deep_space() -> Scenario {
     }
 }
 
-fn fly(mut scenario: Scenario) {
+/// `FCS_PROVIDER` re-backs every actor in the scenario; `FCS_MODEL` names the
+/// model they run on. That is the whole configuration surface, and it makes
+/// the point the config layer exists to make: putting a different model
+/// behind the same ship is an environment variable, not a code change, and it
+/// touches neither the kernel nor the loop.
+fn apply_overrides(mut config: ShipConfig) -> Result<ShipConfig, String> {
+    if let Ok(name) = env::var("FCS_PROVIDER") {
+        let name = name.trim();
+        let kind = ProviderKind::from_name(name).ok_or_else(|| {
+            format!(
+                "unknown provider: {name} (known providers: {})",
+                provider_names().join(", ")
+            )
+        })?;
+        config = config.with_provider_kind(kind);
+    }
+
+    if let Ok(model) = env::var("FCS_MODEL") {
+        config = config.with_model(model);
+    }
+
+    Ok(config)
+}
+
+fn provider_names() -> Vec<&'static str> {
+    ProviderKind::ALL.iter().map(|kind| kind.name()).collect()
+}
+
+fn fly(mut ship: Ship, events: &[(u32, WorldEvent)]) {
+    for (name, provider) in ship.manifest() {
+        println!("# aboard: {name} [{provider}]");
+    }
+
     for tick in 1..=DEFAULT_TICKS {
-        for (at, event) in &scenario.events {
+        for (at, event) in events {
             if *at == tick {
-                scenario.ship.world.push_event(event.clone());
+                ship.world.push_event(event.clone());
             }
         }
 
-        let snapshot = scenario.ship.tick();
+        let snapshot = ship.tick();
         println!("{}", format_report(&snapshot));
-        report_turns(&scenario.ship);
+        report_turns(&ship);
     }
 }
 

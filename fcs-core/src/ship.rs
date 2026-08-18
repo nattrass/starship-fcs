@@ -11,6 +11,7 @@
 //! propose can be anything but a proposal.
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use crate::actors::{
     Actor, DialogueLine, Perception, PerceptionEvent, MAX_RECENT_DIALOGUE, MAX_RECENT_EVENTS,
@@ -75,6 +76,14 @@ impl Ship {
     /// how many there are or what backs them.
     pub fn board(&mut self, actor: Box<dyn Actor>) {
         self.actors.push(actor);
+    }
+
+    /// Who is aboard, by name and the provider behind each.
+    pub fn manifest(&self) -> Vec<(&str, &str)> {
+        self.actors
+            .iter()
+            .map(|actor| (actor.name(), actor.provider_name()))
+            .collect()
     }
 
     fn subsystems_mut(&mut self) -> [&mut dyn Subsystem; 5] {
@@ -315,6 +324,29 @@ impl Ship {
         });
 
         snapshot
+    }
+}
+
+/// Written by hand because an actor is a boxed trait object over a provider,
+/// and a provider has no business being formatted — it may hold an API key.
+/// The crew appear as who they are instead.
+impl fmt::Debug for Ship {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ship")
+            .field("clock", &self.clock)
+            .field("world", &self.world)
+            .field("reactor", &self.reactor)
+            .field("life_support", &self.life_support)
+            .field("propulsion", &self.propulsion)
+            .field("navigation", &self.navigation)
+            .field("comms", &self.comms)
+            .field("telemetry", &self.telemetry)
+            .field("autonomy", &self.autonomy)
+            .field("mode", &self.mode)
+            .field("faults", &self.faults)
+            .field("crew", &self.manifest())
+            .field("recorder", &self.recorder)
+            .finish_non_exhaustive()
     }
 }
 

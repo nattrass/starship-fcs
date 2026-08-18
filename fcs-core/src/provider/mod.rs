@@ -15,6 +15,9 @@
 
 pub mod mock;
 
+#[cfg(feature = "online")]
+pub mod online;
+
 pub use mock::MockProvider;
 
 use std::fmt;

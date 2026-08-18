@@ -12,10 +12,10 @@
 //! - **In**: a [`Perception`] is rendered to plain text. Nothing structured
 //!   crosses to the provider — no snapshot, no `Command`, no ship handle —
 //!   so there is no object for a model to reach back through.
-//! - **Out**: raw provider text is parsed by [`protocol`](crate::protocol)
-//!   and nothing else. The role is supplied here, from the actor's own
-//!   identity, so a crew agent cannot claim to be the ship's mind by saying
-//!   so, and malformed lines are dropped rather than salvaged.
+//! - **Out**: raw provider text is parsed by [`protocol`] and nothing else.
+//!   The role is supplied here, from the actor's own identity, so a crew
+//!   agent cannot claim to be the ship's mind by saying so, and malformed
+//!   lines are dropped rather than salvaged.
 //! - **Sideways**: a provider failure becomes a [`TurnFailure`], which the
 //!   [`watchdog`](crate::watchdog) converts into the autopilot's plan for
 //!   the tick. A hung or hostile model costs the ship a turn, never control.
@@ -212,6 +212,13 @@ impl ShipMind {
 
     pub fn with_persona(mut self, persona: impl Into<String>) -> Self {
         self.persona = persona.into();
+        self
+    }
+
+    /// Renames this mind. Its [`Role`] is unaffected — a name is an identity
+    /// in the dialogue and the flight record, never an authority.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
         self
     }
 }

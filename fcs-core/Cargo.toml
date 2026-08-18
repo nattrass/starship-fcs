@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+[features]
+# Networked provider adapters. Adds no dependencies — the adapters hand-roll
+# HTTP/1.1 and JSON over `std::net` — so `Cargo.lock` stays at the two
+# workspace members with the feature on or off. TLS is supplied by the
+# embedder through the `HttpTransport` seam.
+online = []

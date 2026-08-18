@@ -33,10 +33,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # The online adapters are a whole module tree the default build does not
+      # compile, so they need their own pass or they rot unnoticed.
+      - name: Clippy (online)
+        run: cargo clippy --workspace --all-targets --locked --features online -- -D warnings
+
       # The modules carry the architecture in their doc comments and link to
       # each other, so a broken intra-doc link is a broken explanation.
       - name: Docs
-        run: cargo doc --workspace --no-deps --document-private-items
+        run: cargo doc --workspace --no-deps --document-private-items --all-features
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -54,6 +59,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked --features online
 
   doctrine:
     # Guards the invariants in README.md's Doctrine section that the compiler
@@ -65,10 +71,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Core depends on zero external crates
+      - name: Zero external crates, in every feature set
         run: |
           if grep -q '^source = ' Cargo.lock; then
-            echo "::error file=Cargo.lock::Cargo.lock contains a package from an external source. The core must build with zero external crates; online provider dependencies must be optional and behind the 'online' feature."
+            echo "::error file=Cargo.lock::Cargo.lock contains a package from an external source. The workspace must build with zero external crates in every feature set, the online adapters included."
             grep -n -B 2 '^source = ' Cargo.lock
             exit 1
           fi
@@ -80,6 +86,11 @@ jobs:
 
       - name: Builds and tests with no network access
         run: cargo test --workspace --locked --offline
+
+      # The strongest form of the zero-crates rule: if the online adapters had
+      # picked up a dependency, this could not resolve it.
+      - name: The online adapters need no crates either
+        run: cargo test --workspace --locked --offline --features online
 
       - name: Every crate root forbids unsafe code
         run: |

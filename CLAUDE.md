@@ -11,6 +11,15 @@ cargo test --workspace                      # full suite (all tests are colocate
 cargo clippy --workspace --all-targets      # expected to be warning-clean
 ```
 
+The `online` feature must be checked too — it compiles a whole module tree the default build does
+not, and CI runs both:
+
+```sh
+cargo test --workspace --features online
+cargo clippy --workspace --all-targets --features online
+FCS_PROVIDER=ollama FCS_MODEL=llama3.1 cargo run -p fcs --features online -- run crewed-deep-space
+```
+
 Run a single test or a module's tests by path — tests live inside the crate, so filter on the module:
 
 ```sh
@@ -71,6 +80,13 @@ and nothing else. Two invariants there are load-bearing and easy to break by acc
 The prompt's command vocabulary comes from `actors::command_contract()`, which reads the subsystems'
 own `commands()` schemas — don't hand-write a verb or a range into a prompt.
 
+[config](fcs-core/src/config.rs) is where a deployment is described: `ShipConfig` → `ActorSpec` →
+`ProviderSpec`, built into a `Ship`. Swapping or mixing models should be a change to that data and
+nothing else — if it makes you edit `safety`, `subsystems`, `fdir`, or `ship`, the change is wrong.
+Two things stay out of it on purpose: the authorization table (kernel policy, not deployment
+config — a config that could widen it could disarm the ship) and API keys (a spec names an
+environment variable; the key is read at build time and never stored or recorded).
+
 Physical limits (`THERMAL_CEILING_K`, `MIN_SAFE_O2_LEVEL`, `MIN_USABLE_SIGNAL_STRENGTH`, …) are
 declared as `pub const` next to the subsystem that owns them, and FDIR, the interlocks, the autopilot
 and the mock provider all import from there. Don't restate a threshold at its point of use.
@@ -79,13 +95,20 @@ and the mock provider all import from there. Don't restate a threshold at its po
 
 These are load-bearing, not preferences:
 
-- **Zero external crates.** `[dependencies]` is empty and `Cargo.lock` contains only the two
-  workspace members. Later online provider adapters are the sole exception and must be
-  `optional = true` behind an `online` feature.
+- **Zero external crates, in every feature set.** `[dependencies]` is empty and `Cargo.lock` contains
+  only the two workspace members — with `--features online` as well as without. The original plan
+  allowed optional crates for the network adapters; the build went further and hand-rolled HTTP/1.1
+  ([`provider/online/http.rs`](fcs-core/src/provider/online/http.rs)) and JSON
+  ([`provider/online/json.rs`](fcs-core/src/provider/online/json.rs)) instead. The price is TLS: the
+  bundled `TcpTransport` is plaintext-only, and HTTPS is the embedder's to supply through the
+  `HttpTransport` trait. **Do not add a dependency to buy that back** without the user asking.
 - **No `HashMap`/`HashSet` on any decision or recording path** — `BTreeMap`/`BTreeSet`/`Vec` only, so
   iteration order is stable and replay is bit-for-bit.
 - **No wall-clock time, no randomness** anywhere in the core. Determinism is asserted directly: tests
-  run a scenario twice and compare.
+  run a scenario twice and compare. `provider::online` is the one place outside that envelope — it
+  is sockets and timeouts by nature — which is why it is feature-gated, why it can only reach the
+  ship as text through an actor, and why it never retries: a failure there is a watchdog
+  `TurnFailure` and the autopilot's tick.
 - `#![forbid(unsafe_code)]` at every crate root; errors surface via `Result`; no `unwrap()` on the
   control path (test code aside).
 - Actors only ever *propose*. Any change that lets a proposal reach subsystem state without a kernel

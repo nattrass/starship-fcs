@@ -119,10 +119,62 @@ fcs-core/    the entire system; no external crates
   watchdog    guards an actor's turn; falls back to autopilot on hang or error
   protocol    the strict SAY:/DO: line grammar — the only way text becomes a proposal
   provider    the LLM seam: text in, text out, nothing else
+    online/   feature-gated network adapters (anthropic, openai, ollama)
+              + hand-rolled http/json and the HttpTransport seam
   actors      ShipMind and CrewAgent — untrusted, and only ever propose
+  config      who is aboard and what backs them — the only file you edit to swap a model
   recorder    append-only flight recorder, replayable
   ship        the integration loop
 ```
+
+## Online providers
+
+The default build has no network code in it at all. The adapters live behind a cargo feature:
+
+```sh
+cargo run -p fcs --features online -- run crewed-deep-space
+```
+
+Which provider backs the crew is configuration, not code — `FCS_PROVIDER` re-backs every actor in a
+scenario and `FCS_MODEL` names the model:
+
+```sh
+FCS_PROVIDER=ollama FCS_MODEL=llama3.1 cargo run -p fcs --features online -- run crewed-deep-space
+```
+
+| Provider | Endpoint | Key | Model |
+| --- | --- | --- | --- |
+| `mock` | none — in-process | none | none |
+| `ollama` | `http://localhost:11434/api/chat` | none | required |
+| `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` | defaults to `claude-opus-5` |
+| `openai` | `https://api.openai.com/v1/chat/completions` | `OPENAI_API_KEY` | required |
+
+A spec names the *environment variable* that holds a key, never the key. Nothing that gets logged,
+printed, or recorded has ever held one.
+
+**Still zero external crates.** The adapters hand-roll HTTP/1.1 framing and just enough JSON, so
+`Cargo.lock` contains the same two workspace members with the feature on as with it off. What that
+costs is TLS: the bundled `TcpTransport` speaks plaintext, so **Ollama works out of the box** and
+the hosted providers need a transport you supply.
+
+```rust
+impl HttpTransport for MyTlsTransport {
+    fn name(&self) -> &str { "my-tls" }
+    fn send(&mut self, request: &HttpRequest) -> Result<HttpResponse, TransportError> { … }
+}
+
+let ship = ShipConfig::new(1.0)
+    .with_actor(ActorSpec::ship_mind(ProviderSpec::new(ProviderKind::Anthropic)))
+    .build_with(|| Box::new(MyTlsTransport::new()))?;
+```
+
+Asked for an `https://` endpoint it cannot reach, `TcpTransport` refuses and says so — a ship that
+believed it had an encrypted link and did not would be worse than one that stops.
+
+Nothing retries. A rate limit, a timeout, a 500, an unreachable server: each becomes a
+`ProviderError`, then a watchdog `TurnFailure`, and the autopilot flies that tick. Start the crewed
+scenario with no Ollama running and you can watch it happen — both actors fail every tick and the
+ship completes the flight anyway.
 
 ## Doctrine
 
@@ -133,17 +185,21 @@ These are the rules the code is held to, and reviews should enforce them:
 - The LLM layer is untrusted and never mutates state directly — actors only ever *propose*.
 - No `HashMap` iteration in any decision or recording path.
 - `#![forbid(unsafe_code)]` in every crate; errors surface via `Result`; no `unwrap()` on the control path.
+- Zero external crates, in **every** feature set. `Cargo.lock` holds the two workspace members and
+  nothing else, with `--features online` or without it.
+- A model can be swapped, mixed per actor, or removed entirely by touching `config` and `provider`.
+  If a change like that needs `safety`, `subsystems`, or `ship` edited, the change is wrong.
 - Every phase leaves the workspace compiling and the test suite green.
 
 ## Status
 
-Phases 1–5 are complete: deterministic core, safety kernel, FDIR/autopilot/watchdog, the replayable
-recorder, and the full LLM seam — `LlmProvider`, the strict `SAY:` / `DO:` protocol, a deterministic
-mock provider, and `ShipMind`/`CrewAgent` actors wired into the loop behind the watchdog.
-`cargo test --workspace` passes 148/148, offline and with zero external crates.
+All six phases are complete: deterministic core, safety kernel, FDIR/autopilot/watchdog, the
+replayable recorder, the full LLM seam (`LlmProvider`, the strict `SAY:` / `DO:` protocol, a
+deterministic mock provider, `ShipMind`/`CrewAgent` actors behind the watchdog), and feature-gated
+Anthropic/OpenAI/Ollama adapters with a configuration layer that assigns a provider per actor.
 
-Next up is Phase 6: feature-gated online provider adapters behind an `online` feature, and a
-configuration layer that assigns a provider per actor without the kernel changing.
+`cargo test --workspace` passes 160/160 offline, and 235/235 with `--features online`. `Cargo.lock`
+contains two packages either way.
 
 ## License
 
